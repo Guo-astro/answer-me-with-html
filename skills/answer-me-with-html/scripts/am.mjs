@@ -3,7 +3,7 @@
 
 // src/cli.js
 import { parseArgs } from "node:util";
-import { readFileSync as readFileSync7, writeFileSync as writeFileSync5, mkdirSync as mkdirSync4, existsSync as existsSync5 } from "node:fs";
+import { readFileSync as readFileSync8, writeFileSync as writeFileSync6, mkdirSync as mkdirSync5, existsSync as existsSync5 } from "node:fs";
 
 // src/assets.js
 var VERSION = "0.4.15";
@@ -318,7 +318,7 @@ var VIDEO_EXPORT_JS = "// The export engine for the path that has no ffmpeg: the
 var VIDEO_MUX_JS = "// Minimal WebM (Matroska) writer for the export path that has no ffmpeg: the browser encodes the frames (WebCodecs,\n// see src/runtime/video.js) and this module writes the container. One VP8/VP9 video track and an optional Opus audio\n// track. The blocks are buffered, sorted by time and cut into clusters of about a second, so the sound and the\n// picture of a moment sit next to each other in the file. The Segment and the Clusters carry the unknown size, which\n// is how a stream is written: nothing needs to be measured first and nothing is patched afterwards.\n// Plain bytes only (no Buffer, no imports), so the same source runs in Node and inside a page (scripts/inline-assets.mjs\n// turns it into a script for the player page).\nconst APP = 'answer-me-with-html';   // MuxingApp / WritingApp\nconst CLUSTER_MS = 1000;              // how much time one cluster holds\nconst SEEK_PRE_ROLL_NS = 80_000_000;  // what the Opus specification asks for\n\nconst ID = {\n  EBML: [0x1a, 0x45, 0xdf, 0xa3],\n  EBMLVersion: [0x42, 0x86], EBMLReadVersion: [0x42, 0xf7], EBMLMaxIDLength: [0x42, 0xf2], EBMLMaxSizeLength: [0x42, 0xf3],\n  DocType: [0x42, 0x82], DocTypeVersion: [0x42, 0x87], DocTypeReadVersion: [0x42, 0x85],\n  Segment: [0x18, 0x53, 0x80, 0x67], Info: [0x15, 0x49, 0xa9, 0x66], TimecodeScale: [0x2a, 0xd7, 0xb1],\n  MuxingApp: [0x4d, 0x80], WritingApp: [0x57, 0x41], Duration: [0x44, 0x89],\n  Tracks: [0x16, 0x54, 0xae, 0x6b], TrackEntry: [0xae], TrackNumber: [0xd7], TrackUID: [0x73, 0xc5], FlagLacing: [0x9c],\n  CodecID: [0x86], TrackType: [0x83], Video: [0xe0], PixelWidth: [0xb0], PixelHeight: [0xba],\n  Audio: [0xe1], SamplingFrequency: [0xb5], Channels: [0x9f], CodecPrivate: [0x63, 0xa2],\n  CodecDelay: [0x56, 0xaa], SeekPreRoll: [0x56, 0xbb],\n  Cluster: [0x1f, 0x43, 0xb6, 0x75], Timecode: [0xe7], SimpleBlock: [0xa3],\n};\nconst UNKNOWN_SIZE = new Uint8Array([0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);\n\nconst concat = (parts) => {\n  let total = 0;\n  for (const p of parts) total += p.length;\n  const out = new Uint8Array(total);\n  let at = 0;\n  for (const p of parts) { out.set(p, at); at += p.length; }\n  return out;\n};\nconst bytes = (id) => new Uint8Array(id);\nconst text = (s) => new TextEncoder().encode(s);\n\n// Element size as a variable-size integer, in the shortest length that fits; the all-ones value is reserved.\nfunction size(n) {\n  for (let len = 1; len <= 8; len++) {\n    if (len === 8 || n < 2 ** (7 * len) - 1) {\n      const out = new Uint8Array(len);\n      let v = n;\n      for (let i = len - 1; i >= 0; i--) {\n        out[i] = v & 0xff;\n        v = Math.floor(v / 256);\n      }\n      out[0] |= 0x80 >> (len - 1);\n      return out;\n    }\n  }\n}\n\n// Unsigned integer, big endian, as short as it can be (a Matroska integer drops leading zero bytes).\nfunction uint(n) {\n  const out = [];\n  let v = Math.round(n);\n  do {\n    out.unshift(v & 0xff);\n    v = Math.floor(v / 256);\n  } while (v > 0);\n  return new Uint8Array(out);\n}\n\nfunction f64(x) {\n  const out = new Uint8Array(8);\n  new DataView(out.buffer).setFloat64(0, x);\n  return out;\n}\n\nconst elem = (id, payload) => concat([bytes(id), size(payload.length), payload]);\n\n// WebM writer. video: { width, height, codec } with codec 'V_VP9' or 'V_VP8'; audio: null or\n// { channels, codecPrivate, preSkipSamples }. Duration is written up front, so a player knows the length at once.\nclass WebmWriter {\n  constructor({ width, height, durationMs, videoCodec = 'V_VP9', audio = null }) {\n    this.width = width;\n    this.height = height;\n    this.durationMs = durationMs;\n    this.videoCodec = videoCodec;\n    this.audio = audio;\n    this.blocks = [];\n  }\n\n  // track 1 is the picture, track 2 the sound. key marks a key frame; tsUs is the time in microseconds.\n  block({ track, key, tsUs, data }) {\n    this.blocks.push({ track, key: Boolean(key), ms: Math.round(tsUs / 1000), data });\n  }\n\n  count(track) {\n    return this.blocks.reduce((n, b) => n + (b.track === track ? 1 : 0), 0);\n  }\n\n  build() {\n    const parts = [\n      elem(ID.EBML, concat([\n        elem(ID.EBMLVersion, uint(1)),\n        elem(ID.EBMLReadVersion, uint(1)),\n        elem(ID.EBMLMaxIDLength, uint(4)),\n        elem(ID.EBMLMaxSizeLength, uint(8)),\n        elem(ID.DocType, text('webm')),\n        elem(ID.DocTypeVersion, uint(4)),\n        elem(ID.DocTypeReadVersion, uint(2)),\n      ])),\n      concat([bytes(ID.Segment), UNKNOWN_SIZE]),\n      elem(ID.Info, concat([\n        elem(ID.TimecodeScale, uint(1_000_000)),\n        elem(ID.MuxingApp, text(APP)),\n        elem(ID.WritingApp, text(APP)),\n        elem(ID.Duration, f64(this.durationMs)),\n      ])),\n      elem(ID.Tracks, concat([this.#videoTrack(), ...(this.audio ? [this.#audioTrack()] : [])])),\n    ];\n    for (const cluster of this.#clusters()) parts.push(cluster);\n    return concat(parts);\n  }\n\n  #track(num, type, codecId, extra) {\n    return elem(ID.TrackEntry, concat([\n      elem(ID.TrackNumber, uint(num)),\n      elem(ID.TrackUID, uint(num)),\n      elem(ID.FlagLacing, uint(0)),\n      elem(ID.CodecID, text(codecId)),\n      elem(ID.TrackType, uint(type)),\n      ...extra,\n    ]));\n  }\n\n  #videoTrack() {\n    return this.#track(1, 1, this.videoCodec, [\n      elem(ID.Video, concat([elem(ID.PixelWidth, uint(this.width)), elem(ID.PixelHeight, uint(this.height))])),\n    ]);\n  }\n\n  #audioTrack() {\n    const { channels, codecPrivate, preSkipSamples } = this.audio;\n    const extra = [elem(ID.Audio, concat([elem(ID.SamplingFrequency, f64(48000)), elem(ID.Channels, uint(channels))]))];\n    if (codecPrivate) extra.unshift(elem(ID.CodecPrivate, codecPrivate));\n    // The encoder adds pre-skip samples of silence; CodecDelay tells the player to drop them again.\n    extra.push(elem(ID.CodecDelay, uint((preSkipSamples / 48000) * 1e9)), elem(ID.SeekPreRoll, uint(SEEK_PRE_ROLL_NS)));\n    return this.#track(2, 2, 'A_OPUS', extra);\n  }\n\n  #clusters() {\n    const blocks = [...this.blocks].sort((a, b) => a.ms - b.ms || a.track - b.track);\n    const out = [];\n    for (let i = 0; i < blocks.length; ) {\n      const start = blocks[i].ms;\n      const body = [elem(ID.Timecode, uint(start))];\n      while (i < blocks.length && blocks[i].ms - start <= CLUSTER_MS) {\n        body.push(this.#block(blocks[i], start));\n        i++;\n      }\n      out.push(concat([bytes(ID.Cluster), UNKNOWN_SIZE, ...body]));\n    }\n    return out;\n  }\n\n  #block(b, clusterStart) {\n    const head = new Uint8Array(4);\n    head[0] = 0x80 | b.track;                 // the track number as a variable-size integer\n    new DataView(head.buffer).setInt16(1, b.ms - clusterStart);\n    head[3] = b.key ? 0x80 : 0x00;\n    return elem(ID.SimpleBlock, concat([head, b.data]));\n  }\n}\n\nwindow.__amvWebm = { WebmWriter };\n";
 
 // src/cli.js
-import { join as join7, resolve as resolve3, dirname as dirname2, basename as basename3 } from "node:path";
+import { join as join8, resolve as resolve4, dirname as dirname3, basename as basename4 } from "node:path";
 import { spawn as spawn4 } from "node:child_process";
 
 // src/languages/zh.js
@@ -7544,14 +7544,14 @@ function bestVoice(candidates, base) {
 }
 var stripName = (name) => name.replace(/\s*[(（].*$/, "");
 function run(cmd, args) {
-  return new Promise((resolve4, reject) => {
+  return new Promise((resolve5, reject) => {
     const p = spawn(cmd, args, { stdio: ["ignore", "ignore", "pipe"] });
     let err = "";
     p.stderr.on("data", (d) => {
       err += d;
     });
     p.on("error", reject);
-    p.on("close", (code) => code === 0 ? resolve4() : reject(new TtsError(`${cmd} failed (${code}): ${err.slice(0, 200)}`)));
+    p.on("close", (code) => code === 0 ? resolve5() : reject(new TtsError(`${cmd} failed (${code}): ${err.slice(0, 200)}`)));
   });
 }
 function textFile(wavFile, text) {
@@ -7952,14 +7952,14 @@ async function exportMp4(htmlFile, mp4File, { wav: wav2, env = process.env, onPr
     });
     ffmpeg.stdin.on("error", () => {
     });
-    const done = new Promise((resolve4, reject) => {
+    const done = new Promise((resolve5, reject) => {
       ffmpeg.on("error", (e) => {
         exited = true;
         reject(new ExportError(`Cannot run ffmpeg: ${e.message}`));
       });
       ffmpeg.on("close", (code) => {
         exited = true;
-        if (code === 0) resolve4();
+        if (code === 0) resolve5();
         else reject(new ExportError(`ffmpeg failed (${code}): ${ffErr.slice(0, 300)}`));
       });
     });
@@ -8015,7 +8015,7 @@ async function exportWebm(htmlFile, webmFile, { env = process.env, onProgress = 
   }
 }
 function devtoolsUrl(chrome, timeoutMs = CHROME_START_TIMEOUT_MS) {
-  return new Promise((resolve4, reject) => {
+  return new Promise((resolve5, reject) => {
     let buf = "";
     const fail = (msg) => {
       clearTimeout(timer);
@@ -8031,13 +8031,13 @@ ${tail}` : msg));
       const m = buf.match(/DevTools listening on (ws:\/\/\S+)/);
       if (m) {
         clearTimeout(timer);
-        resolve4(m[1]);
+        resolve5(m[1]);
       }
     });
   });
 }
 function connect(url) {
-  return new Promise((resolve4, reject) => {
+  return new Promise((resolve5, reject) => {
     const ws = new WebSocket(url);
     const pending = /* @__PURE__ */ new Map();
     const waiters = /* @__PURE__ */ new Map();
@@ -8055,7 +8055,7 @@ function connect(url) {
         waiters.delete(msg.method);
       }
     });
-    ws.addEventListener("open", () => resolve4({
+    ws.addEventListener("open", () => resolve5({
       send(method, params = {}, sessionId) {
         return new Promise((ok, fail) => {
           const msgId = ++id;
@@ -8397,6 +8397,196 @@ ${text.replace(/^\n+/, "")}`;
   return [...lines.slice(0, start), ...newLines, ...lines.slice(end)].join("\n");
 }
 
+// src/serve.js
+import { createServer } from "node:http";
+import { connect as connect2 } from "node:net";
+import { uptime } from "node:os";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { readFileSync as readFileSync7, writeFileSync as writeFileSync5, renameSync as renameSync3, rmSync as rmSync5, mkdirSync as mkdirSync4 } from "node:fs";
+import { lstat, realpath, readFile } from "node:fs/promises";
+import { join as join7, resolve as resolve3, dirname as dirname2, basename as basename3, sep as sep2 } from "node:path";
+var DEFAULT_PORT = 8765;
+var HOST = "127.0.0.1";
+var TOKEN_LENGTH = 22;
+var PREFIX2 = Object.freeze({ p: "pages", v: "videos" });
+var PREFIX_OF = Object.freeze({ pages: "p", videos: "v" });
+var LOOPBACK_HOST = /^(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?$/i;
+var SANDBOX = "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads";
+var HEADERS = Object.freeze({
+  "Content-Security-Policy": `frame-ancestors 'none'; ${SANDBOX}`,
+  "X-Frame-Options": "DENY",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "no-referrer",
+  "Cache-Control": "no-store",
+  "Cross-Origin-Resource-Policy": "same-origin"
+});
+var ServeError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ServeError";
+  }
+};
+var infoPath = (home) => join7(home, "serve.json");
+function pageToken(secret, dir, file) {
+  return createHmac("sha256", secret).update(`${dir}/${file}`).digest("base64url").slice(0, TOKEN_LENGTH);
+}
+function pageLink({ port, secret }, dir, file) {
+  return `http://${HOST}:${port}/${PREFIX_OF[dir]}/${pageToken(secret, dir, file)}/${encodeURIComponent(file)}`;
+}
+function validFileName(name) {
+  return typeof name === "string" && name.length > 0 && name.endsWith(".html") && !/[/\\\0]/.test(name) && !name.includes("..");
+}
+function tokenMatches(secret, dir, file, token) {
+  const expected = Buffer.from(pageToken(secret, dir, file));
+  const given = Buffer.from(token);
+  return given.length === expected.length && timingSafeEqual(given, expected);
+}
+function alive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+var BOOT_SLACK_MS = 5e3;
+var bootedBefore = (startedAt) => startedAt < Date.now() - uptime() * 1e3 - BOOT_SLACK_MS;
+function readServeInfo(home) {
+  try {
+    const info = JSON.parse(readFileSync7(infoPath(home), "utf8"));
+    const ok = info && Number.isInteger(info.port) && typeof info.secret === "string" && info.secret.length > 0 && Number.isFinite(info.startedAt) && !bootedBefore(info.startedAt) && alive(info.pid);
+    return ok ? { pid: info.pid, port: info.port, secret: info.secret } : null;
+  } catch {
+    return null;
+  }
+}
+function serveLink(home, file) {
+  try {
+    const info = readServeInfo(home);
+    if (!info) return null;
+    const path = resolve3(file);
+    const dir = ["pages", "videos"].find((d) => dirname2(path) === resolve3(home, d));
+    const name = basename3(path);
+    return dir && validFileName(name) ? pageLink(info, dir, name) : null;
+  } catch {
+    return null;
+  }
+}
+function writeInfo(home, info) {
+  mkdirSync4(home, { recursive: true });
+  const tmp = `${infoPath(home)}.${process.pid}.tmp`;
+  rmSync5(tmp, { force: true });
+  writeFileSync5(tmp, `${JSON.stringify(info)}
+`, { mode: 384, flag: "wx" });
+  renameSync3(tmp, infoPath(home));
+}
+function removeInfo(home, secret) {
+  try {
+    if (JSON.parse(readFileSync7(infoPath(home), "utf8")).secret === secret) rmSync5(infoPath(home), { force: true });
+  } catch {
+  }
+}
+function reply(req, res, status, type, body = "") {
+  res.writeHead(status, { ...HEADERS, "Content-Type": type, "Content-Length": Buffer.byteLength(body) });
+  res.end(req.method === "HEAD" ? void 0 : body);
+}
+var notFound = (req, res) => reply(req, res, 404, "text/plain; charset=utf-8", "Not found\n");
+async function resolvePage(home, dir, file) {
+  try {
+    const root = await realpath(join7(home, dir));
+    const path = join7(root, file);
+    if (!(await lstat(path)).isFile()) return null;
+    const real = await realpath(path);
+    return real.startsWith(root + sep2) ? real : null;
+  } catch {
+    return null;
+  }
+}
+function handler(home, secret) {
+  return async (req, res) => {
+    try {
+      if (!LOOPBACK_HOST.test(req.headers.host ?? "")) return notFound(req, res);
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        res.setHeader("Allow", "GET, HEAD");
+        return reply(req, res, 405, "text/plain; charset=utf-8", "Method not allowed\n");
+      }
+      const parts = req.url.split(/[?#]/)[0].split("/");
+      if (parts.length !== 4 || parts[0] !== "") return notFound(req, res);
+      const [, prefix, token, raw] = parts;
+      const dir = Object.hasOwn(PREFIX2, prefix) ? PREFIX2[prefix] : void 0;
+      if (!dir || !token || !raw) return notFound(req, res);
+      let file;
+      try {
+        file = decodeURIComponent(raw);
+      } catch {
+        return notFound(req, res);
+      }
+      if (!validFileName(file) || !tokenMatches(secret, dir, file, token)) return notFound(req, res);
+      const dest = req.headers["sec-fetch-dest"];
+      if (dest !== void 0 && dest !== "document") return notFound(req, res);
+      const real = await resolvePage(home, dir, file);
+      if (!real) return notFound(req, res);
+      return reply(req, res, 200, "text/html; charset=utf-8", await readFile(real));
+    } catch {
+      return notFound(req, res);
+    }
+  };
+}
+function listening(port, timeout = 500) {
+  return new Promise((done) => {
+    const socket = connect2({ host: HOST, port });
+    const end = (up) => {
+      socket.destroy();
+      done(up);
+    };
+    socket.setTimeout(timeout, () => end(false));
+    socket.once("connect", () => end(true));
+    socket.once("error", () => end(false));
+  });
+}
+async function startServer({ home, port = DEFAULT_PORT }) {
+  const running = readServeInfo(home);
+  if (running && await listening(running.port)) throw new ServeError(`am serve is already running on http://${HOST}:${running.port} (pid ${running.pid}); stop it first`);
+  const secret = randomBytes(32).toString("hex");
+  const server = createServer(handler(home, secret));
+  await new Promise((done, fail) => {
+    server.once("error", (e) => fail(e.code === "EADDRINUSE" ? new ServeError(`Port ${port} is already in use; pick another with am serve --port <n>`) : e));
+    server.listen(port, HOST, done);
+  });
+  const actual = server.address().port;
+  writeInfo(home, { pid: process.pid, port: actual, secret, startedAt: Date.now() });
+  let closed;
+  const close = () => {
+    closed ??= new Promise((done) => {
+      removeInfo(home, secret);
+      server.close(() => done());
+      server.closeAllConnections();
+    });
+    return closed;
+  };
+  return { port: actual, secret, close };
+}
+async function runServe({ home, port, print, fail }) {
+  let srv;
+  try {
+    srv = await startServer({ home, port });
+  } catch (e) {
+    if (!(e instanceof ServeError)) throw e;
+    fail(`\u2717 ${e.message}`);
+    return 1;
+  }
+  return new Promise((done) => {
+    const stop = () => srv.close().then(() => done(0));
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+    process.once("SIGHUP", stop);
+    process.once("exit", () => removeInfo(home, srv.secret));
+    print(`Serving pages on http://${HOST}:${srv.port} (Ctrl-C to stop). am render prints a link for each page.`);
+    print(`Reaching it from another computer: run ssh -L ${srv.port}:${HOST}:${srv.port} user@host there, then open the links in its browser.`);
+  });
+}
+
 // src/cli.js
 var MAX_LISTED_WARNINGS = 20;
 var USAGE = `Answer me with HTML ${VERSION} \u2014 renders a Markdown draft into a single-file HTML explainer page
@@ -8411,6 +8601,7 @@ Usage:
                                                   render a video draft into a 3b1b-style explainer video player page (--mp4 / --webm also save a video file)
   am lint   <file|->  [--style off|80|strict]     run only the STE controlled-writing check
   am config [set <key> <value> | get <key> | reset [key]]  show or change settings
+  am serve  [--port 8765]                         serve pages on 127.0.0.1 so a remote host can open them over http (am render then prints a link:)
   am clean  [--days 30] [--all] [--dry-run]       delete old pages, old videos and the voice-over cache
   am theme check <name|file.json> [--no-open]     check a theme's colors and contrast, and render specimen pages
   am list                                         list templates, themes and components
@@ -8578,6 +8769,7 @@ async function main(argv, io = {}) {
         panel: { type: "string" },
         from: { type: "string" },
         days: { type: "string" },
+        port: { type: "string" },
         all: { type: "boolean" },
         "dry-run": { type: "boolean" },
         help: { type: "boolean", short: "h" },
@@ -8610,6 +8802,8 @@ ${USAGE}`);
       return cmdTheme(arg, rest[0], opts, ctx);
     case "clean":
       return cmdClean(opts, { print, fail, env });
+    case "serve":
+      return cmdServe(opts, { print, fail, env });
     case "__update-check":
       return await runUpdateCheck(amHome(env)) ? 0 : 1;
     case "list":
@@ -8631,7 +8825,7 @@ async function withSource(arg, io, fail, fn3) {
   const cwd = io.cwd ?? process.cwd();
   let src;
   try {
-    src = arg === "-" ? await readStream(io.stdin ?? process.stdin) : readFileSync7(resolve3(cwd, arg), "utf8");
+    src = arg === "-" ? await readStream(io.stdin ?? process.stdin) : readFileSync8(resolve4(cwd, arg), "utf8");
   } catch (e) {
     fail(`\u2717 Cannot read the draft: ${e.message}`);
     return 2;
@@ -8640,7 +8834,7 @@ async function withSource(arg, io, fail, fn3) {
     fail("\u2717 The draft is empty");
     return 2;
   }
-  return fn3(src, arg === "-" ? cwd : dirname2(resolve3(cwd, arg)));
+  return fn3(src, arg === "-" ? cwd : dirname3(resolve4(cwd, arg)));
 }
 async function readStream(stream) {
   const chunks = [];
@@ -8720,10 +8914,10 @@ async function cmdPatch(htmlArg, fromArg, opts, ctx) {
     return 2;
   }
   const cwd = io.cwd ?? process.cwd();
-  const file = resolve3(cwd, htmlArg);
+  const file = resolve4(cwd, htmlArg);
   let html;
   try {
-    html = readFileSync7(file, "utf8");
+    html = readFileSync8(file, "utf8");
   } catch (e) {
     fail(`\u2717 Cannot read the HTML: ${e.message}`);
     return 2;
@@ -8737,7 +8931,7 @@ async function cmdPatch(htmlArg, fromArg, opts, ctx) {
   const from = opts.from ?? fromArg;
   let replacement;
   try {
-    replacement = !from || from === "-" ? await readStream(io.stdin ?? process.stdin) : readFileSync7(resolve3(cwd, from), "utf8");
+    replacement = !from || from === "-" ? await readStream(io.stdin ?? process.stdin) : readFileSync8(resolve4(cwd, from), "utf8");
   } catch (e) {
     fail(`\u2717 Cannot read the new panel draft: ${e.message}`);
     return 2;
@@ -8811,7 +9005,7 @@ async function buildVideo(src, voice, opts, config, { fail, env, io, themes: the
   const provider = io.ttsProvider !== void 0 ? io.ttsProvider : pickProvider(voice, env);
   const result = await renderVideo(src, {
     provider,
-    cacheDir: join7(amHome(env), "cache", "tts"),
+    cacheDir: join8(amHome(env), "cache", "tts"),
     defaults: { style: config.values.style, theme: config.values.theme, mode: config.values.mode },
     overrides: { style: opts.style, theme: opts.theme, mode: opts.mode },
     previousLanguage: opts.previousLanguage,
@@ -8850,13 +9044,15 @@ function themeWarnings({ fail, themes: themes2 }) {
   themes2.warnings.forEach((w) => fail(`! ${w}`));
 }
 function outputPath(dir, title, opts, { env, io }) {
-  if (opts.out) return resolve3(io.cwd ?? process.cwd(), opts.out);
-  return join7(amHome(env), dir, `${slug(title)}-${stamp(new Date(io.now?.() ?? Date.now()))}.html`);
+  if (opts.out) return resolve4(io.cwd ?? process.cwd(), opts.out);
+  return join8(amHome(env), dir, `${slug(title)}-${stamp(new Date(io.now?.() ?? Date.now()))}.html`);
 }
-function emit(result, file, { print }, note2 = "") {
-  mkdirSync4(dirname2(file), { recursive: true });
-  writeFileSync5(file, result.html);
+function emit(result, file, { print, env }, note2 = "") {
+  mkdirSync5(dirname3(file), { recursive: true });
+  writeFileSync6(file, result.html);
   print(`\u2713 ${file}`);
+  const link = serveLink(amHome(env), file);
+  if (link) print(`  link: ${link}`);
   print(`  ${summaryLine(result)}${note2}`);
   if (result.stats.code?.length) print(`  code embedded from: ${result.stats.code.join(", ")}`);
   const long = result.stats.codeWarnings ?? [];
@@ -8923,6 +9119,14 @@ function cmdClean(opts, { print, fail, env }) {
   print(`Data directory: ${home} (${mb(before.total)} in total: ${count(before.pages.count, "page")}, ${count(before.videos.count, "video")}, ${mb(before.cache.bytes)} voice-over cache)`);
   print(dry ? `Would delete ${count(r.files, "file")}, freeing ${mb(r.bytes)} (${scope} + voice-over cache). Run without --dry-run to delete.` : `\u2713 Deleted ${count(r.files, "file")}, freeing ${mb(r.bytes)} (${scope} + voice-over cache). Settings were kept.`);
   return 0;
+}
+function cmdServe(opts, { print, fail, env }) {
+  if (opts.port !== void 0 && !(/^\d+$/.test(opts.port.trim()) && Number(opts.port) <= 65535)) {
+    fail("\u2717 --port needs a number from 0 to 65535 (0 picks a free port)");
+    return 2;
+  }
+  const port = opts.port === void 0 ? DEFAULT_PORT : Number(opts.port);
+  return runServe({ home: amHome(env), port, print, fail });
 }
 function cmdLint(src, opts, { print, fail }) {
   let doc2;
@@ -9038,8 +9242,8 @@ function cmdTheme(action, target, opts, ctx) {
     return 2;
   }
   const isFile = /\.json$/i.test(target) || /[\\/]/.test(target);
-  const path = isFile ? resolve3(io.cwd ?? process.cwd(), target) : join7(amHome(env), "themes", `${target}.json`);
-  const name = isFile ? basename3(path).replace(/\.json$/i, "") : target;
+  const path = isFile ? resolve4(io.cwd ?? process.cwd(), target) : join8(amHome(env), "themes", `${target}.json`);
+  const name = isFile ? basename4(path).replace(/\.json$/i, "") : target;
   let theme;
   let errors = [];
   if (!isFile && getTheme(name)) {
@@ -9062,8 +9266,8 @@ function cmdTheme(action, target, opts, ctx) {
   const files = ["light", "dark"].map((mode) => {
     const result = renderDoc(specimenDraft(name, mode), { theme: name, mode, style: "off" }, {}, { themes: themes2 });
     const file = outputPath("pages", `theme-${name}-${mode}`, {}, ctx);
-    mkdirSync4(dirname2(file), { recursive: true });
-    writeFileSync5(file, result.html);
+    mkdirSync5(dirname3(file), { recursive: true });
+    writeFileSync6(file, result.html);
     print(`\u2713 ${file}`);
     return file;
   });
