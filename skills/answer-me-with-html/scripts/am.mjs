@@ -353,6 +353,7 @@ var zh_default = {
     toc: "\u76EE\u5F55",
     flow: "\u6D41\u7A0B\u56FE",
     sequence: "\u65F6\u5E8F\u56FE",
+    er: "\u5B9E\u4F53\u5173\u7CFB\u56FE",
     colon: "\uFF1A",
     sep: "\u3001",
     expand: "\u5C55\u5F00\u67E5\u770B\u56FE\u8868",
@@ -402,6 +403,7 @@ var zh_Hant_default = {
     toc: "\u76EE\u9304",
     flow: "\u6D41\u7A0B\u5716",
     sequence: "\u6642\u5E8F\u5716",
+    er: "\u5BE6\u9AD4\u95DC\u806F\u5716",
     colon: "\uFF1A",
     sep: "\u3001",
     expand: "\u5C55\u958B\u67E5\u770B\u5716\u8868",
@@ -445,6 +447,7 @@ var en_default = {
     toc: "Contents",
     flow: "Flowchart",
     sequence: "Sequence diagram",
+    er: "Entity relationship diagram",
     colon: ": ",
     sep: ", ",
     expand: "Expand diagram",
@@ -493,6 +496,7 @@ var ja_default = {
     toc: "\u76EE\u6B21",
     flow: "\u30D5\u30ED\u30FC\u30C1\u30E3\u30FC\u30C8",
     sequence: "\u30B7\u30FC\u30B1\u30F3\u30B9\u56F3",
+    er: "ER \u56F3",
     colon: "\uFF1A",
     sep: "\u3001",
     expand: "\u62E1\u5927\u8868\u793A",
@@ -541,6 +545,7 @@ var he_default = {
     toc: "\u05EA\u05D5\u05DB\u05DF \u05D4\u05E2\u05E0\u05D9\u05D9\u05E0\u05D9\u05DD",
     flow: "\u05EA\u05E8\u05E9\u05D9\u05DD \u05D6\u05E8\u05D9\u05DE\u05D4",
     sequence: "\u05EA\u05E8\u05E9\u05D9\u05DD \u05E8\u05E6\u05E3",
+    er: "\u05EA\u05E8\u05E9\u05D9\u05DD \u05D9\u05E9\u05D5\u05D9\u05D5\u05EA \u05D5\u05E7\u05E9\u05E8\u05D9\u05DD",
     colon: ": ",
     sep: ", ",
     expand: "\u05D4\u05D2\u05D3\u05DC\u05EA \u05D4\u05EA\u05E8\u05E9\u05D9\u05DD",
@@ -2630,10 +2635,11 @@ function charWidth(ch, mono) {
   if (ch >= "A" && ch <= "Z") return 0.68;
   return 0.56;
 }
-function measure(str, size = 13, { mono = false } = {}) {
+var BOLD = 1.06;
+function measure(str, size = 13, { mono = false, bold = false } = {}) {
   let units = 0;
   for (const ch of String(str ?? "")) units += charWidth(ch, mono);
-  return Math.round(units * size * 100) / 100;
+  return Math.round(units * size * (bold ? BOLD : 1) * 100) / 100;
 }
 var HANGUL_SYLLABLE = /[가-힯]/;
 var HAN_KANA = new RegExp(CJK_RE.source.replace(HANGUL_SYLLABLE.source.slice(1, -1), ""));
@@ -3421,7 +3427,7 @@ function textLines(lines, cx, cy, lineHeight, attrs = "", dir = "ltr") {
   const top2 = cy - (lines.length - 1) * lineHeight / 2;
   return lines.map((line, i) => `<text x="${f(cx)}" y="${f(top2 + i * lineHeight)}" text-anchor="middle" dominant-baseline="central"${attrs}>${esc(svgLine(line, dir))}</text>`).join("");
 }
-var EN_LABELS = { flow: "Flowchart", sequence: "Sequence diagram", colon: ": ", sep: ", " };
+var EN_LABELS = { flow: "Flowchart", sequence: "Sequence diagram", er: "Entity relationship diagram", colon: ": ", sep: ", " };
 function diagramLabel(ui, kind2, names) {
   const u = { ...EN_LABELS, ...ui };
   return `${u[kind2]}${u.colon}${names.join(u.sep)}`;
@@ -3433,6 +3439,18 @@ function svgOpen(width, height, label, dir = "ltr") {
   return `<svg viewBox="0 0 ${w} ${h2}" width="${w}" height="${h2}" role="img" aria-label="${esc(label)}"${direction} xmlns="http://www.w3.org/2000/svg">`;
 }
 var mirror = (width, rtl) => rtl ? (x2) => width - x2 : (x2) => x2;
+function mirrorLayout(g) {
+  const flip = mirror(g.graph().width, true);
+  for (const v of g.nodes()) {
+    const node = g.node(v);
+    node.x = flip(node.x);
+  }
+  for (const e of g.edges()) {
+    const edge = g.edge(e);
+    edge.points = edge.points.map((p) => ({ ...p, x: flip(p.x) }));
+    if (edge.x !== void 0) edge.x = flip(edge.x);
+  }
+}
 
 // src/components/sequence.js
 var FS = 13;
@@ -5837,18 +5855,6 @@ function badgePoint(shape, x2, y2, w, h2, rtl = false) {
   if (shape === "round") return [x2 + s * (w / 2 - h2 * 0.15), y2 - h2 / 2 + h2 * 0.15];
   return [x2 + s * (w / 2), y2 - h2 / 2];
 }
-function mirrorLayout(g) {
-  const flip = mirror(g.graph().width, true);
-  for (const v of g.nodes()) {
-    const node = g.node(v);
-    node.x = flip(node.x);
-  }
-  for (const e of g.edges()) {
-    const edge = g.edge(e);
-    edge.points = edge.points.map((p) => ({ ...p, x: flip(p.x) }));
-    if (edge.x !== void 0) edge.x = flip(edge.x);
-  }
-}
 function shapeSvg(shape, x2, y2, w, h2) {
   const l3 = x2 - w / 2;
   const t = y2 - h2 / 2;
@@ -5874,6 +5880,330 @@ function diamondPoint(node, toward) {
   const k2 = Math.abs(dx) / (node.width / 2) + Math.abs(dy) / (node.height / 2);
   if (k2 === 0) return { x: node.x, y: node.y };
   return { x: node.x + dx / k2, y: node.y + dy / k2 };
+}
+
+// src/components/er.js
+var FS3 = 13;
+var FIELD_FS = 12;
+var KEY_FS = 11;
+var EDGE_FS2 = 11.5;
+var LH3 = 17;
+var HEAD_LH = 20;
+var FIELD_LH = 17;
+var PAD = 11;
+var KEY_GAP = 12;
+var MIN_WIDTH = 92;
+var LOOP_OUT = 34;
+var LOOP_STEP = 20;
+var LOOP_END = 18;
+var LOOP_LABEL = 24;
+var LOOP_GAP = 6;
+var DIRS2 = /* @__PURE__ */ new Set(["TB", "LR", "BT", "RL"]);
+var CARDS = ["1\\.\\.\\*", "0\\.\\.1", "\\*", "1"];
+var MARKERS = /* @__PURE__ */ new Set(["PK", "FK", "UK"]);
+var RELATIONSHIP = new RegExp(`^(\\S+)\\s+(${CARDS.join("|")})\\s*--\\s*(${CARDS.join("|")})\\s+(\\S+)\\s*(?::\\s*(.*))?$`);
+var MERMAID = /^(\S+)\s+([|o{}]{2})(?:--|\.\.)([|o{}]{2})\s+(\S+)\s*(?::\s*(.*))?$/;
+var MERMAID_CARDS = { "||": "1", "o|": "0..1", "|o": "0..1", "|{": "1..*", "}|": "1..*", "o{": "*", "}o": "*" };
+var er_default = {
+  name: "er",
+  summary: "Entity relationship diagram (automatic layout, crow's-foot ends)",
+  syntax: `\`\`\`er [TB|LR|BT|RL]
+*User                         \u2190 a line at column 0 is an entity; * highlights it
+  id PK                       \u2190 an indented line is a field: name [type] [PK|FK|UK]
+  email string UK
+Order
+  id PK
+  user_id FK -> User          \u2190 FK -> Entity draws the many-to-one relationship (*--1)
+User 1--* Order: places       \u2190 A <cardinality>--<cardinality> B: label (optional)
+\`\`\`
+- Cardinalities are 1, 0..1, * and 1..*. The left end is drawn at the entity on the left, the right end at the entity on the right.
+- A field's FK -> Entity already draws its relationship, so a relationship line is optional. A relationship line that names the same two entities replaces the implied one and sets the cardinality and the label. Two FK fields that point at the same entity draw two relationships.
+- The type is optional: \`email UK\` is a field with a key but no type.
+- A Mermaid line such as USER ||--o{ ORDER is an error that shows the line written for this component.
+- An entity a field or a relationship names must be written at column 0.
+- A field that points at its own entity draws a loop: beside the box, or below it in LR and RL.
+- The default direction is TB (top to bottom).`,
+  example: "```er LR\n*User\n  id PK\n  email string UK\nOrder\n  id PK\n  user_id FK -> User\nUser 1--* Order: places\n```",
+  render(text, { args, ui, dir: pageDir = "ltr" }) {
+    const model = parseEr(text);
+    const dir = (args.match(/\b(TB|LR|BT|RL)\b/i)?.[1] ?? "TB").toUpperCase();
+    return `<figure class="am-diagram am-er">${layout3(model, DIRS2.has(dir) ? dir : "TB", ui, pageDir)}</figure>`;
+  }
+};
+function parseEr(text) {
+  const entities = /* @__PURE__ */ new Map();
+  const written = [];
+  let current = null;
+  for (const { raw, text: line, line: n } of contentLines(text)) {
+    if (/^\s/.test(raw)) {
+      if (!current) throw new ComponentError(`"${line}": a field line must follow an entity; write the entity name at the start of its own line first`, n);
+      current.fields.push(parseField(line, n));
+      continue;
+    }
+    const rel = line.match(RELATIONSHIP);
+    if (rel) {
+      written.push({ from: rel[1], fromCard: rel[2], to: rel[4], toCard: rel[3], label: rel[5]?.trim() ?? "", line: n });
+      current = null;
+      continue;
+    }
+    const mermaid = line.match(MERMAID);
+    if (mermaid && MERMAID_CARDS[mermaid[2]] && MERMAID_CARDS[mermaid[3]]) {
+      throw new ComponentError(`"${line}" is Mermaid syntax; write ${erLineOf(mermaid)}`, n);
+    }
+    if (line.includes("--") || line.includes("{") || line.includes("}")) {
+      throw new ComponentError(`"${line}" is not an entity of this component; write A 1--* B for a relationship, or the entity name at column 0 on its own line`, n);
+    }
+    const hi = line.startsWith("*");
+    const name = (hi ? line.slice(1) : line).trim();
+    if (!name) throw new ComponentError("an entity needs a name", n);
+    if (entities.has(name)) throw new ComponentError(`entity "${name}" is written twice`, n);
+    current = { name, hi, fields: [], line: n };
+    entities.set(name, current);
+  }
+  if (!entities.size) throw new ComponentError("an entity relationship diagram needs at least one entity (a line at column 0)", 1);
+  for (const entity of entities.values()) {
+    for (const field of entity.fields) {
+      if (field.ref && !entities.has(field.ref)) throw new ComponentError(`no entity "${field.ref}"; write it at column 0`, field.line);
+    }
+  }
+  for (const rel of written) {
+    for (const name of [rel.from, rel.to]) {
+      if (!entities.has(name)) throw new ComponentError(`no entity "${name}"; write it at column 0`, rel.line);
+    }
+  }
+  return { entities, written };
+}
+function parseField(line, n) {
+  const tokens = line.split(/\s+/);
+  const name = tokens.shift();
+  const arrow = tokens.indexOf("->");
+  const head = arrow === -1 ? tokens : tokens.slice(0, arrow);
+  const ref = arrow === -1 ? null : tokens[arrow + 1];
+  if (arrow !== -1 && (ref === void 0 || arrow + 2 !== tokens.length)) {
+    throw new ComponentError(`"${line}": write the entity a field points at as "-> Entity", after the key marker`, n);
+  }
+  if (ref !== null && head.at(-1) !== "FK") {
+    throw new ComponentError(`"${line}": only a FK field points at another entity; mark the field FK`, n);
+  }
+  const at3 = head.findIndex((t) => MARKERS.has(t));
+  if (at3 !== -1 && at3 !== head.length - 1) throw new ComponentError(`"${line}": "${head[at3]}" must be the last word before "->"`, n);
+  const marker = at3 === -1 ? null : head[at3];
+  const type = head.slice(0, at3 === -1 ? head.length : at3).join(" ");
+  return { name, type, marker, ref, line: n };
+}
+function erLineOf(mermaid) {
+  const [, from, left, right, to, label] = mermaid;
+  const text = label?.trim();
+  return `${from} ${MERMAID_CARDS[left]}--${MERMAID_CARDS[right]} ${to}${text ? `: ${text}` : ""}`;
+}
+function relationships({ entities, written }) {
+  const implied = [];
+  for (const entity of entities.values()) {
+    for (const field of entity.fields) {
+      if (field.ref) implied.push({ from: entity.name, fromCard: "*", to: field.ref, toCard: "1", label: "", line: field.line });
+    }
+  }
+  const replaced = new Set(written.map((rel) => pairKey(rel.from, rel.to)));
+  return [...implied.filter((rel) => !replaced.has(pairKey(rel.from, rel.to))), ...written];
+}
+var pairKey = (a, b) => [a, b].sort().join("\0");
+var fieldText = (field) => field.type ? `${field.name} ${field.type}` : field.name;
+var nameWidth = (entity) => measure(entity.name, FS3, { bold: true });
+var rowWidth = (entity, field) => measure(fieldText(field), FIELD_FS, { bold: entity.hi }) + keyWidth(entity, field) + 2 * PAD;
+var keyWidth = (entity, field) => field.marker ? measure(field.marker, KEY_FS, { mono: true, bold: entity.hi }) + KEY_GAP : 0;
+function nodeSize2(entity) {
+  const rows = entity.fields.map((field) => rowWidth(entity, field));
+  return { width: Math.ceil(Math.max(MIN_WIDTH, nameWidth(entity) + 2 * PAD, ...rows)), height: HEAD_LH + entity.fields.length * FIELD_LH + 2 * PAD };
+}
+function layout3(model, rankdir, ui, pageDir = "ltr") {
+  const { entities } = model;
+  const rels = relationships(model);
+  const loops = rels.filter((rel) => rel.from === rel.to);
+  const g = new $o.graphlib.Graph({ multigraph: true });
+  g.setGraph({ rankdir, nodesep: 44, ranksep: 62, marginx: 14, marginy: 14 });
+  g.setDefaultEdgeLabel(() => ({}));
+  const key = new Map([...entities.keys()].map((name, i) => [name, `n${i}`]));
+  const below = rankdir === "LR" || rankdir === "RL";
+  const room = /* @__PURE__ */ new Map();
+  if (below) {
+    for (const name of entities.keys()) {
+      const own = loops.filter((rel) => rel.from === name);
+      if (own.length) room.set(name, loopRoom(own));
+    }
+  }
+  const sizes = /* @__PURE__ */ new Map();
+  for (const entity of entities.values()) {
+    const size = nodeSize2(entity);
+    sizes.set(entity.name, size);
+    g.setNode(key.get(entity.name), { width: size.width, height: size.height + (room.get(entity.name) ?? 0) });
+  }
+  const centre = (name) => {
+    const { x: x2, y: y2 } = g.node(key.get(name));
+    return { x: x2, y: y2 - (room.get(name) ?? 0) / 2 };
+  };
+  rels.filter((rel) => rel.from !== rel.to).forEach((rel, i) => {
+    const label2 = rel.label ? { label: rel.label, width: measure(rel.label, EDGE_FS2) + 10, height: 18, labelpos: "c" } : {};
+    g.setEdge(key.get(rel.from), key.get(rel.to), label2, `e${i}`);
+  });
+  $o.layout(g);
+  const rtl = pageDir === "rtl";
+  if (rtl) mirrorLayout(g);
+  const steps = [.../* @__PURE__ */ new Set([...[...entities.values()].map((e) => e.line), ...rels.map((r) => r.line)])].sort((a, b) => a - b);
+  const stepOf = new Map(steps.map((line, i) => [line, i]));
+  const straight = rels.filter((rel) => rel.from !== rel.to).map((rel, i) => {
+    const data = g.edge({ v: key.get(rel.from), w: key.get(rel.to), name: `e${i}` });
+    const points = data.points.map((p) => ({ ...p }));
+    if (room.has(rel.from)) points[0] = clipToBox(centre(rel.from), sizes.get(rel.from), data.points[1]);
+    if (room.has(rel.to)) points[points.length - 1] = clipToBox(centre(rel.to), sizes.get(rel.to), data.points[data.points.length - 2]);
+    return { rel, data, points };
+  });
+  const edgeSvg = straight.map(({ rel, data, points }) => {
+    const label2 = rel.label ? labelSvg(rel.label, data.x, data.y, pageDir) : "";
+    return `<g data-step="${stepOf.get(rel.line)}"><path class="am-edge" d="${smoothPath(points)}"/>${endsSvg(points, rel)}${label2}</g>`;
+  });
+  const nodeSvg = [...entities.values()].map((entity) => {
+    const { x: x2, y: y2 } = centre(entity.name);
+    const size = sizes.get(entity.name);
+    return nodeSvgOf(entity, x2, y2, size, stepOf.get(entity.line), pageDir);
+  });
+  const s = rtl ? -1 : 1;
+  const seen = /* @__PURE__ */ new Map();
+  const loopSpecs = loops.map((rel) => {
+    const { nth, depth } = seen.get(rel.from) ?? { nth: 0, depth: 0 };
+    seen.set(rel.from, { nth: nth + 1, depth: depth + LOOP_STEP + (rel.label ? LOOP_LABEL : 0) });
+    const { x: x2, y: y2 } = centre(rel.from);
+    const size = sizes.get(rel.from);
+    return below ? loopBelow(rel, x2, y2, size, depth, s) : loopBeside(rel, x2, y2, size, nth, s);
+  });
+  const loopsSvg = loopSpecs.map((spec) => loopSvg(spec, stepOf.get(spec.rel.line), pageDir));
+  const xs = [];
+  const ys = [];
+  const at3 = (x2, y2) => {
+    xs.push(x2);
+    ys.push(y2);
+  };
+  for (const entity of entities.values()) {
+    const { x: x2, y: y2 } = centre(entity.name);
+    const size = sizes.get(entity.name);
+    at3(x2 - size.width / 2, y2 - size.height / 2);
+    at3(x2 + size.width / 2, y2 + size.height / 2);
+  }
+  straight.forEach(({ rel, data, points }) => {
+    for (const p of points) at3(p.x, p.y);
+    if (rel.label) {
+      const w = labelWidth2(rel.label);
+      at3(data.x - w / 2, data.y - 9);
+      at3(data.x + w / 2, data.y + 9);
+    }
+  });
+  for (const { corners } of loopSpecs) corners.forEach(([x2, y2]) => at3(x2, y2));
+  const margin = 14;
+  const shiftX = margin - Math.min(...xs);
+  const shiftY = margin - Math.min(...ys);
+  const shift = shiftX || shiftY ? ` transform="translate(${f(shiftX)},${f(shiftY)})"` : "";
+  const width = Math.ceil(Math.max(...xs) - Math.min(...xs)) + 2 * margin;
+  const height = Math.ceil(Math.max(...ys) - Math.min(...ys)) + 2 * margin;
+  const label = diagramLabel(ui, "er", [...entities.keys()].slice(0, 8));
+  return `${svgOpen(width, height, label, pageDir)}<g${shift}><g>${edgeSvg.join("")}</g><g>${loopsSvg.join("")}</g><g>${nodeSvg.join("")}</g></g></svg>`;
+}
+function loopRoom(own) {
+  const steps = own.slice(0, -1).reduce((depth, rel) => depth + LOOP_STEP + (rel.label ? LOOP_LABEL : 0), 0);
+  return LOOP_OUT + steps + (own.at(-1).label ? LOOP_LABEL : 0) + LOOP_GAP;
+}
+function clipToBox(centre, size, toward) {
+  const dx = toward.x - centre.x;
+  const dy = toward.y - centre.y;
+  const k2 = Math.max(Math.abs(dx) / (size.width / 2), Math.abs(dy) / (size.height / 2));
+  if (k2 === 0) return { ...centre };
+  return { x: centre.x + dx / k2, y: centre.y + dy / k2 };
+}
+function nodeSvgOf(entity, x2, y2, size, step, pageDir) {
+  const left = x2 - size.width / 2;
+  const top2 = y2 - size.height / 2;
+  const [nameX, keyX] = pageDir === "rtl" ? [left + size.width - PAD, left + PAD] : [left + PAD, left + size.width - PAD];
+  const head = `<text class="am-er-head" font-weight="600" x="${f(nameX)}" y="${f(top2 + PAD + HEAD_LH / 2)}" dominant-baseline="central">${esc(svgLine(entity.name, pageDir))}</text>`;
+  const rule = `<line class="am-er-rule am-edge" opacity="0.45" x1="${f(left)}" y1="${f(top2 + PAD + HEAD_LH)}" x2="${f(left + size.width)}" y2="${f(top2 + PAD + HEAD_LH)}"/>`;
+  const fields2 = entity.fields.map((field, i) => {
+    const cy = top2 + PAD + HEAD_LH + FIELD_LH * (i + 0.5) + 1;
+    const marker = field.marker ? `<text class="am-er-key am-cluster-label" x="${f(keyX)}" y="${f(cy)}" text-anchor="end" dominant-baseline="central">${esc(svgLine(field.marker, pageDir))}</text>` : "";
+    return `<text class="am-er-field" style="font-size:${FIELD_FS}px" x="${f(nameX)}" y="${f(cy)}" dominant-baseline="central">${esc(svgLine(fieldText(field), pageDir))}</text>${marker}`;
+  }).join("");
+  return `<g class="am-node am-node--er${entity.hi ? " am-node--hi" : ""}" data-key="${esc(entity.name)}" data-step="${step}"><rect class="am-node-shape" x="${f(left)}" y="${f(top2)}" width="${f(size.width)}" height="${f(size.height)}" rx="3"/>${head}${rule}${fields2}</g>`;
+}
+function loopBeside(rel, x2, y2, size, nth, s) {
+  const edge = x2 + s * size.width / 2;
+  const out = edge + s * LOOP_OUT + s * nth * LOOP_STEP;
+  const [ay, by] = [y2 - LOOP_END / 2, y2 + LOOP_END / 2];
+  const label = rel.label ? { x: out + s * 6 + s * labelWidth2(rel.label) / 2, y: y2 } : null;
+  return {
+    rel,
+    a: { x: edge, y: ay },
+    b: { x: edge, y: by },
+    c: [{ x: out, y: ay }, { x: out, y: by }],
+    away: { x: s, y: 0 },
+    label,
+    corners: [[out + s * 6 + s * (rel.label ? labelWidth2(rel.label) : 0), by], [out, ay]]
+  };
+}
+function loopBelow(rel, x2, y2, size, depth, s) {
+  const bottom = y2 + size.height / 2;
+  const out = bottom + LOOP_OUT + depth;
+  const [ax, bx] = [x2 - s * LOOP_END / 2, x2 + s * LOOP_END / 2];
+  const half = Math.max(LOOP_END / 2, rel.label ? labelWidth2(rel.label) / 2 : 0);
+  return {
+    rel,
+    a: { x: ax, y: bottom },
+    b: { x: bx, y: bottom },
+    c: [{ x: ax, y: out }, { x: bx, y: out }],
+    away: { x: 0, y: 1 },
+    label: rel.label ? { x: x2, y: out + 6 + 9 } : null,
+    corners: [[x2 - half, bottom], [x2 + half, out + (rel.label ? 6 + 18 : 0)]]
+  };
+}
+function loopSvg({ rel, a, b, c, away, label }, step, pageDir) {
+  const path = `<path class="am-edge" d="M${f(a.x)},${f(a.y)} C${f(c[0].x)},${f(c[0].y)} ${f(c[1].x)},${f(c[1].y)} ${f(b.x)},${f(b.y)}"/>`;
+  const ends = `${endMark(a, { x: a.x + away.x, y: a.y + away.y }, rel.fromCard)}${endMark(b, { x: b.x + away.x, y: b.y + away.y }, rel.toCard)}`;
+  const text = label ? labelSvg(rel.label, label.x, label.y, pageDir) : "";
+  return `<g data-step="${step}">${path}${ends}${text}</g>`;
+}
+function labelWidth2(text) {
+  return measure(text, EDGE_FS2) + 10;
+}
+function labelSvg(text, x2, y2, pageDir) {
+  const w = labelWidth2(text);
+  return `<g class="am-edge-label"><rect x="${f(x2 - w / 2)}" y="${f(y2 - 9)}" width="${f(w)}" height="18" rx="3"/>${textLines([text], x2, y2, LH3, "", pageDir)}</g>`;
+}
+function endsSvg(points, rel) {
+  if (points.length < 2) return "";
+  return endMark(points.at(-1), points.at(-2), rel.toCard) + endMark(points[0], points[1], rel.fromCard);
+}
+var R3 = { back: 12, side: 5, gap: 5 };
+function endMark(point, toward, card) {
+  const dx = point.x - toward.x;
+  const dy = point.y - toward.y;
+  const length = Math.hypot(dx, dy) || 1;
+  const ux = dx / length;
+  const uy = dy / length;
+  const px = -uy;
+  const py = ux;
+  const at3 = (back, side) => ({ x: point.x - ux * back + px * side, y: point.y - uy * back + py * side });
+  const line = (a, b) => `<line x1="${f(a.x)}" y1="${f(a.y)}" x2="${f(b.x)}" y2="${f(b.y)}"/>`;
+  const bar = (back) => line(at3(back, -R3.side), at3(back, R3.side));
+  const foot = (apexBack) => {
+    const apex = at3(apexBack, 0);
+    return [line(at3(0, -R3.side), apex), line(at3(0, 0), apex), line(at3(0, R3.side), apex)].join("");
+  };
+  const circle = (back) => {
+    const c = at3(back, 0);
+    return `<circle cx="${f(c.x)}" cy="${f(c.y)}" r="3.4" style="fill: var(--paper, #ffffff)"/>`;
+  };
+  const marks = {
+    "1": () => bar(R3.back),
+    "0..1": () => bar(R3.back) + circle(R3.back + R3.gap),
+    "*": () => foot(R3.back),
+    "1..*": () => foot(R3.back) + bar(R3.back + R3.gap)
+  }[card]();
+  return `<g class="am-er-end am-edge">${marks}</g>`;
 }
 
 // src/components/ask.js
@@ -5926,7 +6256,7 @@ The question, one sentence
 };
 
 // src/components/index.js
-var ALL2 = [callout_default, kv_default, timeline_default, annot_default, tree_default, limits_default, sequence_default, flow_default, ask_default];
+var ALL2 = [callout_default, kv_default, timeline_default, annot_default, tree_default, limits_default, sequence_default, flow_default, er_default, ask_default];
 var COMPONENTS = new Map(ALL2.map((c) => [c.name, c]));
 var RAW_LANGS = /* @__PURE__ */ new Set(["html", "svg"]);
 
@@ -5935,11 +6265,11 @@ function panelHtml(panel, { cols = 3, grid = true, hints = {} } = {}) {
   const { attrs } = panel;
   const span = Math.min(Number(attrs.span) || 1, cols);
   const rows = Number(attrs.rows) || 1;
-  const layout3 = [
+  const layout4 = [
     grid && span > 1 ? `grid-column: span ${span}` : "",
     grid && rows > 1 ? `grid-row: span ${rows}` : ""
   ].filter(Boolean).join("; ");
-  const style = layout3 ? ` style="${layout3}"` : "";
+  const style = layout4 ? ` style="${layout4}"` : "";
   const hinted = Math.floor(Number(hints.span));
   const data = grid && hinted >= 1 ? ` data-span="${Math.min(hinted, cols)}"` : "";
   const cls = `${span > 1 ? " am-span-wide" : ""}${attrs.bare ? " am-panel--bare" : ""}`;
@@ -7780,7 +8110,7 @@ var CLEAN = Object.freeze({
   hintEveryDays: 7
   // the same notice at most once every 7 days
 });
-var DIRS2 = ["pages", "videos", "cache"];
+var DIRS3 = ["pages", "videos", "cache"];
 function walk(dir) {
   let entries;
   try {
@@ -7802,11 +8132,11 @@ function walk(dir) {
 }
 var sum = (files) => files.reduce((n, f2) => n + f2.bytes, 0);
 function usage(home) {
-  const parts = Object.fromEntries(DIRS2.map((d) => {
+  const parts = Object.fromEntries(DIRS3.map((d) => {
     const files = walk(join5(home, d));
     return [d, { count: files.length, bytes: sum(files) }];
   }));
-  return { ...parts, total: DIRS2.reduce((n, d) => n + parts[d].bytes, 0) };
+  return { ...parts, total: DIRS3.reduce((n, d) => n + parts[d].bytes, 0) };
 }
 function clean2(home, { days = CLEAN.days, all = false, dryRun = false, now = Date.now() } = {}) {
   const cutoff = now - days * DAY;
@@ -8130,7 +8460,7 @@ Client -> Server: ACK
 > The client sends ACK, and the connection is open.
 
 - "## " starts a scene; a scene holds components or Markdown (the picture), and lines that start with > are narration (one beat per line).
-- When narration line N plays, step N of the picture appears: in flow / sequence / tree each source line is one step;
+- When narration line N plays, step N of the picture appears: in flow / er / sequence / tree each source line is one step;
   timeline, limits, table rows, list items and paragraphs step item by item. With more steps than narration lines, the steps are spread across the lines;
   with more narration lines than steps, the extra first lines act as an opening and show nothing new.
 - Write [name] in narration: the camera zooms in on the element with that name and highlights it, and the word turns yellow in the caption.
