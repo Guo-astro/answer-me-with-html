@@ -6,6 +6,12 @@ export default {
   script: 'Hans',
   voice: { say: 'zh_CN', espeak: 'cmn' },
   ui: {
+    remark: {
+      button: '标注',
+      hint: '批注（可选）', save: '保存', remove: '删除',
+      section: '标注',
+      kinds: { suggestion: '建议', keep: '保留', question: '疑问', concern: '关注' },
+    },
     theme: '主题', modeLabel: '明暗',
     mode: { auto: '跟随系统', light: '亮', dark: '暗' },
     copy: '复制源稿', done: '已复制 ✓', copyCode: '复制',
