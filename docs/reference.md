@@ -125,7 +125,7 @@ A -> B: hello
 AM_EOF
 ````
 
-Pages go to `~/.answer-me-with-html/pages/` by default. Set `AM_HOME` to move them. The default folder is private to your user (mode 0700), so other users on a shared host cannot read your pages; an existing `AM_HOME` folder keeps its mode.
+Pages go to `~/.answer-me-with-html/pages/` by default. Set `AM_HOME` to move them. A page with STE or code warnings does not open in the browser (add `--open` to open it anyway). To render the fixed draft again, run `am render … --replace <page>`: the earlier page is deleted once the new one is written, so `pages/` keeps one page per answer. The default folder is private to your user (mode 0700), so other users on a shared host cannot read your pages; an existing `AM_HOME` folder keeps its mode.
 
 ## Languages
 

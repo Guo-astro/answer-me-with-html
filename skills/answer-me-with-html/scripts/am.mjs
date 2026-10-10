@@ -3,7 +3,7 @@
 
 // src/cli.js
 import { parseArgs } from "node:util";
-import { readFileSync as readFileSync8, writeFileSync as writeFileSync6, mkdirSync as mkdirSync3, existsSync as existsSync6 } from "node:fs";
+import { readFileSync as readFileSync8, writeFileSync as writeFileSync6, mkdirSync as mkdirSync3, existsSync as existsSync6, rmSync as rmSync6 } from "node:fs";
 
 // src/assets.js
 var VERSION = "0.5.0";
@@ -8771,7 +8771,7 @@ var MAX_LISTED_WARNINGS = 20;
 var USAGE = `Answer me with HTML ${VERSION} \u2014 renders a Markdown draft into a single-file HTML explainer page
 
 Usage:
-  am render <file|->  [-o <path>] [--no-open] [--theme ${["auto", ...themeNames("page")].join("|")}]
+  am render <file|->  [-o <path>] [--replace <page>] [--no-open] [--theme ${["auto", ...themeNames("page")].join("|")}]
                       [--template sheet|doc] [--style off|80|strict] [--mode auto|light|dark]
   am patch  <html> --panel <title> [file|-] [--from file] [--theme \u2026] [--no-open]
                                                   replace one ## panel of an existing page and overwrite that HTML in place
@@ -8788,6 +8788,7 @@ Usage:
 
 - A file argument of - reads from stdin (good for heredoc: am render - <<'EOF' ... EOF).
 - Output goes to ~/.answer-me-with-html/pages/ by default (change it with the AM_HOME environment variable).
+- A page with STE or code warnings does not open. Fix the draft and render again with --replace <page>: the earlier page is deleted once the new one is written.
 - Set auto-open, the default theme and more with am config; --open / --no-open apply to this run only.
 - am patch reads the source draft from the page's hidden #am-source, changes only the ## section that --panel names, and writes the page back to the same path.`;
 var FORMAT = `Draft format (extended Markdown)
@@ -8936,6 +8937,7 @@ async function main(argv, io = {}) {
       allowPositionals: true,
       options: {
         out: { type: "string", short: "o" },
+        replace: { type: "string" },
         "no-open": { type: "boolean" },
         open: { type: "boolean" },
         theme: { type: "string" },
@@ -9030,7 +9032,12 @@ function shouldOpen(opts, env, config) {
   return config.open !== false;
 }
 function cmdRender(src, opts, ctx, baseDir) {
-  const { fail } = ctx;
+  const { fail, print } = ctx;
+  const replaced = opts.replace === void 0 ? null : pagePath(opts.replace, ctx);
+  if (replaced === false) {
+    fail(`\u2717 --replace takes a page that am render wrote (a .html file in ${join9(amHome(ctx.env), "pages")})`);
+    return 2;
+  }
   const config = loadConfig(ctx);
   const { theme, mode, style } = config.values;
   let result;
@@ -9041,7 +9048,15 @@ function cmdRender(src, opts, ctx, baseDir) {
   }
   const file = outputPath("pages", result.meta.title, opts, ctx);
   emit(result, file, ctx);
-  return finish(file, opts, config, ctx);
+  if (replaced && replaced !== resolve4(file)) rmSync6(replaced, { force: true });
+  const held = !opts.open && hasRetryWarnings(result) && shouldOpen(opts, ctx.env, config.values);
+  if (held) print(`  Not opened because of the warnings; to render again, add --replace ${file}`);
+  return finish(file, held ? { ...opts, "no-open": true } : opts, config, ctx);
+}
+var hasRetryWarnings = (result) => result.warnings.length > 0 || (result.stats.codeWarnings ?? []).length > 0;
+function pagePath(arg, { env, io }) {
+  const path = resolve4(io.cwd ?? process.cwd(), arg);
+  return dirname3(path) === resolve4(amHome(env), "pages") && basename4(path).endsWith(".html") ? path : false;
 }
 var PATCH_HELP = `Replace one panel of a rendered page in place
 
